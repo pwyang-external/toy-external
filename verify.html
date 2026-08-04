@@ -45,6 +45,7 @@
 </p>
 <button class="link-btn" onclick="resetUsed()">이 기기의 로컬 사용기록 초기화</button>
 <button class="link-btn" onclick="resetSecretCache()">이 기기에 저장된 비밀키 지우기</button>
+<button class="link-btn" onclick="resetGhConfigCache()">이 기기에 저장된 GitHub 설정 캐시 지우기</button>
 
 <script src="github-sync.js"></script>
 <script src="crypto-config.js"></script>
@@ -267,6 +268,14 @@ function resetSecretCache() {
     localStorage.removeItem('voucherSecretCache');
     document.getElementById('secret').value = '';
     alert('삭제되었습니다.');
+  }
+}
+
+function resetGhConfigCache() {
+  if (confirm('이 기기에 캐시된 GitHub 설정(owner/repo/token)을 지울까요? 다음 확인 시 비밀키로 다시 자동 해제를 시도합니다.')) {
+    localStorage.removeItem('voucherGithubConfig');
+    currentGhCfg = { owner: '', repo: '', branch: 'main', path: 'vouchers.json', token: '' };
+    alert('삭제되었습니다. 페이지를 새로고침한 뒤 다시 확인해보세요.');
   }
 }
 

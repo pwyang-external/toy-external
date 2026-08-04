@@ -37,11 +37,14 @@ async function ghGetFile(cfg, timeoutMs = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // cache: 'no-store' — 브라우저가 이전 응답(예: 발급 기록 올리기 전 상태)을 캐시해서
+    // 재사용하면 방금 push한 내용이 안 보일 수 있어서, 매번 GitHub에서 새로 받아오도록 강제함.
     const res = await fetch(`${ghApiUrl(cfg)}?ref=${encodeURIComponent(cfg.branch || 'main')}`, {
       headers: {
         Authorization: `Bearer ${cfg.token}`,
         Accept: 'application/vnd.github+json'
       },
+      cache: 'no-store',
       signal: controller.signal
     });
     if (res.status === 404) return { list: [], sha: null };

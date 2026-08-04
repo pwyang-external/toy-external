@@ -34,6 +34,7 @@
   <p class="note">💡 이 비밀키는 <code>make-config.html</code>에서 GitHub 설정을 암호화할 때 쓴 암호와 같아야 합니다.
     GitHub owner/repo/token은 여기서 따로 입력하지 않고, 전부 <code>make-config.html</code>에서 만든 설정 파일에서 자동으로 가져옵니다.</p>
   <p class="note" id="ghStatus">GitHub 연동 상태 확인 중...</p>
+  <button type="button" onclick="resetGhConfigCache()" style="background:none;border:none;color:#888;font-size:12px;text-decoration:underline;width:auto;padding:4px;margin-top:0;">이 기기에 저장된 GitHub 설정 캐시 지우기</button>
 
   <label>금액 (원)</label>
   <input id="amount" type="number" value="10000" min="1">
@@ -80,6 +81,14 @@ let currentGhCfg = { owner: '', repo: '', branch: 'main', path: 'vouchers.json',
 
 function ghConfigReady(cfg) {
   return !!(cfg.owner && cfg.repo && cfg.token);
+}
+
+function resetGhConfigCache() {
+  if (confirm('이 기기에 캐시된 GitHub 설정(owner/repo/token)을 지울까요? 다음 발급 시 비밀키로 다시 자동 해제를 시도합니다.')) {
+    localStorage.removeItem('voucherGithubConfig');
+    currentGhCfg = { owner: '', repo: '', branch: 'main', path: 'vouchers.json', token: '' };
+    alert('삭제되었습니다. 페이지를 새로고침한 뒤 다시 시도해보세요.');
+  }
 }
 
 function setGhCfg(cfg, statusMsg) {
