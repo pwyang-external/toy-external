@@ -18,9 +18,9 @@
 
 <h1>🔐 GitHub 설정 암호화 도구</h1>
 <p class="note">
-  이 페이지는 딱 한 번, 관리자가 최초 설정할 때만 씁니다. 여기서 만든
-  <code>github-config.encrypted.json</code>을 issue.html과 같은 폴더에 두면(그리고 git에 커밋해도 안전),
-  <b>어느 기기에서 issue.html을 열든 암호(패스프레이즈)만 입력하면</b> GitHub 설정이 자동으로 채워집니다.
+  이 페이지는 딱 한 번, 관리자가 최초 설정할 때만 씁니다. 여기 입력한 값을 암호화해서
+  <b>같은 GitHub 저장소에 바로 커밋</b>합니다. 이후 <b>어느 기기에서 issue.html/verify.html을 열든
+  암호(패스프레이즈)만 입력하면</b> GitHub 설정이 자동으로 채워집니다.
 </p>
 
 <div class="box warn">
@@ -30,12 +30,12 @@
 
 <div class="box">
   <label>GitHub 계정/조직 (owner)</label>
-  <input id="owner" type="text" placeholder="예: junyoungkim">
+  <input id="owner" type="text" value="pwyang-external" placeholder="예: pwyang-external">
   <label>저장소 이름 (repo)</label>
-  <input id="repo" type="text" placeholder="예: voucher-qr">
+  <input id="repo" type="text" value="toy-external" placeholder="예: toy-external">
   <label>브랜치</label>
   <input id="branch" type="text" value="main">
-  <label>JSON 파일 경로</label>
+  <label>vouchers.json 경로 (issue/verify가 발급기록을 읽고 쓸 파일)</label>
   <input id="path" type="text" value="vouchers.json">
   <label>Fine-grained PAT (이 저장소 전용, Contents 권한만)</label>
   <input id="token" type="password" placeholder="github_pat_...">
@@ -45,13 +45,18 @@
   <label>암호 확인</label>
   <input id="pass2" type="password" placeholder="암호 다시 입력">
 
-  <button onclick="makeConfig()">github-config.encrypted.json 만들기</button>
+  <label>이 암호화 설정 파일 자체를 저장할 경로</label>
+  <input id="configPath" type="text" value="github-config.encrypted.json">
+
+  <button onclick="uploadConfig()">🚀 GitHub에 바로 업로드 (추천)</button>
+  <button onclick="downloadConfig()">💾 PC에 파일로만 다운로드</button>
   <p class="note" id="status"></p>
 </div>
 
 <script src="crypto-config.js"></script>
+<script src="github-sync.js"></script>
 <script>
-async function makeConfig() {
+function readForm() {
   const owner = document.getElementById('owner').value.trim();
   const repo = document.getElementById('repo').value.trim();
   const branch = document.getElementById('branch').value.trim() || 'main';
@@ -59,26 +64,62 @@ async function makeConfig() {
   const token = document.getElementById('token').value.trim();
   const pass1 = document.getElementById('pass1').value;
   const pass2 = document.getElementById('pass2').value;
+  const configPath = document.getElementById('configPath').value.trim() || 'github-config.encrypted.json';
 
-  if (!owner || !repo || !token) { alert('owner, repo, token을 입력하세요.'); return; }
-  if (!pass1) { alert('암호를 입력하세요.'); return; }
-  if (pass1 !== pass2) { alert('암호가 서로 다릅니다.'); return; }
+  if (!owner || !repo || !token) { alert('owner, repo, token을 입력하세요.'); return null; }
+  if (!pass1) { alert('암호를 입력하세요.'); return null; }
+  if (pass1 !== pass2) { alert('암호가 서로 다릅니다.'); return null; }
 
+  return { owner, repo, branch, path, token, pass1, configPath };
+}
+
+async function uploadConfig() {
+  const form = readForm();
+  if (!form) return;
   const status = document.getElementById('status');
   status.textContent = '암호화 중...';
 
-  const blob = await encryptConfig({ owner, repo, branch, path, token }, pass1);
+  const blob = await encryptConfig(
+    { owner: form.owner, repo: form.repo, branch: form.branch, path: form.path, token: form.token },
+    form.pass1
+  );
+
+  status.textContent = 'GitHub에 업로드 중...';
+  try {
+    // 이 파일을 업로드하는 데 쓰는 토큰도, 방금 암호화해서 넣은 그 토큰과 동일합니다
+    // (같은 저장소에 쓰기 권한이 있는 토큰이니 재사용하는 것뿐, 별도 인증이 필요 없습니다).
+    await ghPutFile(
+      { owner: form.owner, repo: form.repo, branch: form.branch, path: form.configPath, token: form.token },
+      () => blob,
+      '암호화된 GitHub 설정 파일 생성/업데이트'
+    );
+    status.textContent = `✅ GitHub에 "${form.configPath}" 로 업로드 완료! 이제 issue.html/verify.html에서 비밀키만 입력하면 됩니다.`;
+  } catch (e) {
+    status.textContent = `❌ 업로드 실패: ${e.message} (아래 [PC에 파일로만 다운로드]로 받아서 직접 커밋할 수도 있습니다)`;
+  }
+}
+
+async function downloadConfig() {
+  const form = readForm();
+  if (!form) return;
+  const status = document.getElementById('status');
+  status.textContent = '암호화 중...';
+
+  const blob = await encryptConfig(
+    { owner: form.owner, repo: form.repo, branch: form.branch, path: form.path, token: form.token },
+    form.pass1
+  );
 
   const json = JSON.stringify(blob, null, 2);
   const fileBlob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(fileBlob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'github-config.encrypted.json';
+  a.download = form.configPath.split('/').pop();
   a.click();
   URL.revokeObjectURL(url);
 
-  status.textContent = '✅ 다운로드됨. 이 파일을 issue.html과 같은 폴더에 넣고 git에 커밋하세요.';
+  status.textContent = `✅ 다운로드됨. 이 파일을 저장소의 "${form.configPath}" 위치에 직접 커밋하세요.`;
 }
 </script>
 </body>

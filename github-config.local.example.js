@@ -5,8 +5,8 @@
 // issue.html이 이 파일을 자동으로 읽어서 GitHub 설정 입력칸을 미리 채웁니다.
 
 window.GH_CONFIG_DEFAULT = {
-  owner: 'your-github-account',
-  repo: 'voucher-qr',
+  owner: 'pwyang-external',
+  repo: 'toy-external',
   branch: 'main',
   path: 'vouchers.json',
   token: 'github_pat_여기에_실제_토큰_입력'

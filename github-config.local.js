@@ -2,9 +2,9 @@
 // issue.html을 열면 이 값이 자동으로 입력창에 채워집니다.
 
 window.GH_CONFIG_DEFAULT = {
-  owner: '',   // 예: 'junyoungkim'
-  repo: '',    // 예: 'voucher-qr'
+  owner: 'pwyang-external',
+  repo: 'toy-external',
   branch: 'main',
   path: 'vouchers.json',
-  token: ''    // 예: 'github_pat_...'
+  token: ''    // 예: 'github_pat_...' — 실제 토큰을 여기 채워야 자동 로그인됩니다
 };

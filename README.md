@@ -10,7 +10,7 @@
 - `github-config.local.example.js` — GitHub 설정 템플릿 (커밋됨, 토큰 없음)
 - `github-config.local.js` — 실제 GitHub 설정/토큰, 평문 (⚠️ `.gitignore`에 등록되어 커밋되지 않음, 이 파일이 있는 그 컴퓨터에서만 동작)
 - `crypto-config.js` — 설정을 암호(패스프레이즈)로 암호화/복호화하는 공통 로직
-- `make-config.html` — 관리자가 최초 1회 실행해 `github-config.encrypted.json`을 만드는 도구
+- `make-config.html` — 관리자가 최초 1회 실행해 `github-config.encrypted.json`을 암호화하고 GitHub에 바로 업로드하는 도구
 - `github-config.encrypted.json` — 암호화된 GitHub 설정 (커밋해도 안전, 어느 기기에서든 암호만 알면 사용 가능)
 
 ## 사용 절차
@@ -50,20 +50,24 @@
 2. **Fine-grained PAT** 발급: https://github.com/settings/personal-access-tokens/new
    - Repository access: **이 저장소만 선택** (다른 저장소는 절대 포함하지 마세요)
    - Permissions: **Contents → Read and write** 만 부여 (그 외 전부 No access)
-3. `make-config.html`을 열어 owner/repo/branch/path/token과 **암호(패스프레이즈)**를 입력하고 생성 버튼 클릭
-   → `github-config.encrypted.json` 다운로드됨. 이 파일을 `issue.html`/`verify.html`과 같은 폴더에 두고
-   **git에 커밋해도 됩니다** (암호 없이는 내용을 알 수 없어 안전합니다).
+3. `make-config.html`을 열어 owner/repo/branch/path/token과 **암호(패스프레이즈)**를 입력하고
+   [🚀 GitHub에 바로 업로드] 클릭 → 같은 토큰으로 `github-config.encrypted.json`이 저장소에 바로 커밋됩니다
+   (별도로 다운로드해서 직접 올릴 필요 없음. 암호 없이는 내용을 알 수 없어 커밋해도 안전합니다).
+   업로드가 안 되는 환경이라면 [💾 PC에 파일로만 다운로드]로 받아서 수동으로 커밋해도 됩니다.
 4. **이때 정하는 암호를, 상품권 발급용 "비밀키"와 똑같이 맞추세요.** 그러면 다음 단계에서 입력값이 하나로 통일됩니다.
 
-### issue.html / verify.html 둘 다 — 입력값은 "비밀키" 하나뿐
+### issue.html / verify.html 둘 다 — GitHub owner/repo/branch/경로/토큰 입력칸이 아예 없음
+두 파일 모두 GitHub 관련 입력창을 화면에 두지 않습니다. **오직 `make-config.html`에서 만든 설정 파일에서만**
+그 값들을 가져옵니다. 사람이 하는 입력은 [비밀키] 하나뿐입니다.
+
 `issue.html`에서 [비밀키]를 입력하고 [코드 발급하기]를 누르는 순간, `verify.html`에서 [비밀키]를 입력하고
 [확인하기]를 누르는 순간, 그 값으로 다음 두 가지가 동시에 처리됩니다:
 1. 상품권 서명(위조) 검증 / 발급
 2. `github-config.encrypted.json` 복호화 (성공하면 그 브라우저에 자동 캐시되어 이후엔 다시 시도 안 함)
 
-GitHub owner/repo/token 같은 건 화면에서 따로 볼 일도, 입력할 일도 없이 **비밀키 하나만** 다루면 됩니다.
-(암호가 서로 다르면 GitHub 연동만 조용히 실패하고, 서명 검증/발급 자체는 정상 진행됩니다 — "오프라인 모드"로 표시됨.
-GitHub 설정을 굳이 따로 넣고 싶다면 각 파일의 "⚙️ GitHub 연동 수동 설정"을 펼쳐서 직접 입력할 수도 있습니다.)
+암호(=비밀키)가 서로 다르면 GitHub 연동만 조용히 실패하고, 서명 검증/발급 자체는 정상 진행됩니다 — 화면에 "오프라인 모드"로 표시됩니다.
+이 경우 GitHub 연동을 쓰려면 `make-config.html`을 다시 열어서, 서명용 비밀키와 같은 암호로 설정 파일을 다시 만들어야 합니다
+(수동으로 owner/repo/token을 입력하는 화면 자체가 없으므로, 고치는 방법은 오직 이것뿐입니다).
 
 발급 후 [GitHub에 발급 기록 저장]을 클릭하면 `vouchers.json`에 발급 목록이 커밋되고, 각 검증 기기는
 자동으로 GitHub을 조회해서 "이미 사용됨" 여부를 판단하고 [사용 처리]도 GitHub에 바로 반영합니다.
@@ -73,8 +77,8 @@ GitHub 설정을 굳이 따로 넣고 싶다면 각 파일의 "⚙️ GitHub 연
 > 이 경우 비밀키 입력 없이도 항상 자동으로 채워집니다 — 단, 그 컴퓨터에서만 동작합니다.
 
 ### QR을 찍으면 검증 페이지로 바로 연결하기 (선택)
-`issue.html`에서 코드를 발급할 때 **"검증 페이지 URL"**란에 배포된 `verify.html`의 주소
-(예: `https://junyoungkim.github.io/voucher-qr/verify.html`)를 입력해두면, QR에는 코드 텍스트 대신
+`issue.html`의 **"검증 페이지 URL"**란에는 기본값으로 `https://pwyang-external.github.io/toy-external/verify.html`이
+미리 입력되어 있습니다. 다른 저장소/계정을 쓴다면 이 값을 실제 배포 주소로 바꾸면 되고, 그대로 두면 QR에는
 `그URL?code=코드` 형태의 링크가 담깁니다.
 
 효과:
