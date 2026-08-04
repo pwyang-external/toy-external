@@ -4,8 +4,8 @@
     "code": "3WMD95-10000-20260804-83AF27430CF5",
     "amount": 10000,
     "expiry": "20260804",
-    "used": false,
-    "usedAt": null,
+    "used": true,
+    "usedAt": "2026-08-04T05:27:41.976Z",
     "issuedAt": "2026-08-04T05:19:40.913Z"
   },
   {
