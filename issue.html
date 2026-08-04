@@ -30,7 +30,7 @@
 
 <div class="box">
   <label>비밀키 (예: 회사이름_2026_임의문자열)</label>
-  <input id="secret" type="text" placeholder="예: emcore-gift-9K2x!qP">
+  <input id="secret" type="password" placeholder="예: emcore-gift-9K2x!qP">
   <p class="note">💡 이 비밀키는 <code>make-config.html</code>에서 GitHub 설정을 암호화할 때 쓴 암호와 같아야 합니다.
     GitHub owner/repo/token은 여기서 따로 입력하지 않고, 전부 <code>make-config.html</code>에서 만든 설정 파일에서 자동으로 가져옵니다.</p>
   <p class="note" id="ghStatus">GitHub 연동 상태 확인 중...</p>
@@ -93,10 +93,12 @@ function updateGhStatusIfUnset(msg) {
 
 window.addEventListener('DOMContentLoaded', async () => {
   // 우선순위: localStorage에 저장된 값 > github-config.local.js 기본값 > 암호화된 파일(비밀키 입력 시 자동 시도)
+  // 각 단계는 owner/repo/token이 "전부" 채워져 있어야 유효한 설정으로 인정합니다.
+  // (owner만 있고 token이 없는 반쯤 채워진 값 때문에 다음 단계 확인을 건너뛰는 버그 방지)
   const cached = ghLoadConfig();
-  if (cached.owner) {
+  if (ghConfigReady(cached)) {
     setGhCfg(cached, '✅ 저장된 GitHub 설정을 불러왔습니다.');
-  } else if (typeof window.GH_CONFIG_DEFAULT !== 'undefined' && window.GH_CONFIG_DEFAULT.owner) {
+  } else if (typeof window.GH_CONFIG_DEFAULT !== 'undefined' && ghConfigReady(window.GH_CONFIG_DEFAULT)) {
     setGhCfg(window.GH_CONFIG_DEFAULT, '✅ github-config.local.js에서 설정을 불러왔습니다.');
   } else {
     try {
