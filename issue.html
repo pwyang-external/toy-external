@@ -21,7 +21,7 @@
 <body>
 
 <h1>🎫 사내 상품권 발급 도구</h1>
-<p class="note">코드 생성 자체는 인터넷 없이 동작합니다. GitHub에 발급 기록을 남기려면 비밀키만 맞게 입력하면 되고, 그 경우만 인터넷이 필요합니다.</p>
+<p class="note">⚠️ 발급된 코드는 GitHub 발급대장(vouchers.json)에 기록되어야만 verify.html에서 확인 가능하므로, GitHub 연동이 되어 있어야 발급할 수 있습니다 (인터넷 연결 필요).</p>
 
 <div class="box warn">
   <b>비밀키(SECRET KEY)</b>는 발급자와 검증자만 알아야 하는 값입니다.<br>
@@ -52,6 +52,15 @@
   <button onclick="issue()">코드 발급하기</button>
 </div>
 
+<div class="box">
+  <b>🧹 발급대장 정리</b>
+  <p class="note"><b>사용완료된 지 1년이 넘게 지났거나, 유효기간이 1년 넘게 지난</b> 코드를 <code>vouchers.json</code>에서
+    삭제해서 파일을 가볍게 유지합니다 (사용 직후 바로 지우지 않고, 조회용으로 1년간은 남겨둡니다).
+    <b>삭제된 코드는 verify.html에서 더 이상 확인되지 않으며 되돌릴 수 없습니다.</b></p>
+  <button onclick="cleanupOldEntries()">정리 실행 (몇 건 삭제될지 먼저 보여줍니다)</button>
+  <p class="note" id="cleanupStatus"></p>
+</div>
+
 <div class="box" id="resultBox" style="display:none">
   <b>발급 결과 (<span id="resultCount"></span>건)</b>
   <table id="resultTable">
@@ -61,7 +70,7 @@
 
   <button onclick="openPrintSheet()">🖨️ 전체 QR 인쇄용 시트 열기</button>
   <button onclick="downloadCSV()">CSV로 다운로드 (코드 텍스트)</button>
-  <button onclick="pushToGithub()">GitHub에 발급 기록 저장</button>
+  <button onclick="pushToGithub()">GitHub에 발급 기록 다시 저장 (자동 저장 실패 시에만 필요)</button>
   <p class="note" id="pushStatus"></p>
 
   <label>코드만 복사 (필요시 다른 도구에 붙여넣기용)</label>
@@ -158,7 +167,7 @@ async function pushToGithub() {
   statusEl.textContent = '저장 중...';
   try {
     const newEntries = lastRows.map(r => ({
-      serial: r.code.split('-')[0],
+      serial: r.code.slice(0, SERIAL_LEN),
       code: r.code,
       amount: Number(r.amount),
       expiry: r.expiry,
@@ -177,6 +186,62 @@ async function pushToGithub() {
   }
 }
 
+// "사용완료된 지 1년 넘게 지난 코드" 또는 "유효기간이 1년 넘게 지난 코드"를 판별
+// (그냥 사용됐다고 바로 지우는 게 아니라, 사용 후에도 1년간은 조회 가능하도록 유예기간을 둠)
+function shouldCleanup(entry, cutoffDateStr, cutoffDate) {
+  const usedOverAYearAgo = entry.used === true && entry.usedAt && new Date(entry.usedAt) < cutoffDate;
+  const expiredOverAYearAgo = entry.expiry && entry.expiry < cutoffDateStr;
+  return usedOverAYearAgo || expiredOverAYearAgo;
+}
+
+async function cleanupOldEntries() {
+  if (!ghConfigReady(currentGhCfg)) {
+    const secret = document.getElementById('secret').value.trim();
+    if (secret) await tryAutoUnlockWithSecret(secret);
+  }
+  if (!ghConfigReady(currentGhCfg)) {
+    alert('GitHub 연동이 되어 있어야 정리할 수 있습니다. 비밀키를 입력한 뒤 다시 시도하세요.');
+    return;
+  }
+
+  const statusEl = document.getElementById('cleanupStatus');
+  statusEl.textContent = '조회 중...';
+
+  const cutoffDate = new Date();
+  cutoffDate.setFullYear(cutoffDate.getFullYear() - 1);
+  const cutoffStr = `${cutoffDate.getFullYear()}${String(cutoffDate.getMonth() + 1).padStart(2, '0')}${String(cutoffDate.getDate()).padStart(2, '0')}`;
+
+  try {
+    const { list } = await ghGetFile(currentGhCfg);
+    const toRemove = list.filter(v => shouldCleanup(v, cutoffStr, cutoffDate));
+
+    if (toRemove.length === 0) {
+      statusEl.textContent = `정리할 코드가 없습니다. (전체 ${list.length}건 모두 유지 대상)`;
+      return;
+    }
+
+    const keepCount = list.length - toRemove.length;
+    const ok = confirm(
+      `전체 ${list.length}건 중 ${toRemove.length}건(사용완료된 지 1년 넘게 지났거나, 유효기간이 1년 넘게 지남)을 삭제하고 ${keepCount}건만 남깁니다.\n` +
+      `삭제된 코드는 verify.html에서 더 이상 확인되지 않으며 되돌릴 수 없습니다.\n계속할까요?`
+    );
+    if (!ok) {
+      statusEl.textContent = '취소되었습니다.';
+      return;
+    }
+
+    statusEl.textContent = '정리 중...';
+    const finalList = await ghPutFile(
+      currentGhCfg,
+      (freshList) => freshList.filter(v => !shouldCleanup(v, cutoffStr, cutoffDate)),
+      `발급대장 정리: ${toRemove.length}건 삭제`
+    );
+    statusEl.textContent = `✅ ${toRemove.length}건 삭제 완료 (${finalList.length}건 남음).`;
+  } catch (e) {
+    statusEl.textContent = `❌ 정리 실패: ${e.message}`;
+  }
+}
+
 async function hmacHex(secret, message) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -187,7 +252,9 @@ async function hmacHex(secret, message) {
 }
 
 const SERIAL_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 혼동되는 0/O, 1/I/L 제외
-function randomSerial(len = 6) {
+const SERIAL_LEN = 4; // 일련번호 길이
+const SIG_LEN = 4;    // 서명(hex) 길이 — 합쳐서 코드 총 8자리
+function randomSerial(len = SERIAL_LEN) {
   const bytes = new Uint8Array(len);
   crypto.getRandomValues(bytes);
   return [...bytes].map(b => SERIAL_CHARS[b % SERIAL_CHARS.length]).join('');
@@ -210,21 +277,47 @@ async function issue() {
     await tryAutoUnlockWithSecret(secret);
   }
 
+  // GitHub에 기록되지 않는 코드는 verify.html에서 "발급 기록에 없는 코드"로 막혀버려 쓸모가 없으므로,
+  // GitHub 연동이 확인된 경우에만 발급을 진행합니다.
+  if (!ghConfigReady(currentGhCfg)) {
+    alert('GitHub 연동이 되어 있어야 발급할 수 있습니다.\n비밀키가 make-config.html에서 쓴 암호와 같은지, github-config.encrypted.json이 저장소에 있는지 확인하세요.');
+    return;
+  }
+
   if (verifyUrl) localStorage.setItem('voucherVerifyUrl', verifyUrl);
 
-  const expiry = expiryRaw.replace(/-/g, ''); // YYYYMMDD
-
+  // 과거에 이미 발급된 일련번호와 겹치지 않도록, GitHub 발급대장을 먼저 조회해둠.
   const seen = new Set();
+  try {
+    const { list: existing } = await ghGetFile(currentGhCfg);
+    existing.forEach(v => { if (v.serial) seen.add(v.serial); });
+  } catch (e) {
+    alert(`GitHub 발급대장 조회에 실패해 발급을 중단합니다: ${e.message}\n인터넷 연결과 GitHub 설정을 확인하세요.`);
+    return;
+  }
+
+  const expiry = expiryRaw.replace(/-/g, ''); // YYYYMMDD
+  const MAX_SERIAL_ATTEMPTS = 5000; // 풀이 거의 소진된 극단적 상황에서 무한루프 방지
+
   const rows = [];
   for (let i = 0; i < count; i++) {
     let serial;
-    do { serial = randomSerial(); } while (seen.has(serial));
+    let attempts = 0;
+    do {
+      serial = randomSerial(SERIAL_LEN);
+      attempts++;
+      if (attempts > MAX_SERIAL_ATTEMPTS) {
+        alert('사용 가능한 일련번호를 찾지 못했습니다. 이미 너무 많은 코드가 발급되어 있을 수 있습니다 (일련번호 자릿수를 늘려야 할 시점입니다).');
+        return;
+      }
+    } while (seen.has(serial));
     seen.add(serial);
 
-    const payload = `${serial}|${amount}|${expiry}`;
-    const sigFull = await hmacHex(secret, payload);
-    const sig = sigFull.slice(0, 12).toUpperCase(); // 48비트, 내부용으로 충분
-    const code = `${serial}-${amount}-${expiry}-${sig}`;
+    // 금액/만료일은 코드 안에 넣지 않고 vouchers.json(GitHub)에서만 조회합니다.
+    // 서명은 "일련번호"만 가지고 계산 — 코드 전체 길이를 8자리(일련번호4+서명4)로 유지하기 위함.
+    const sigFull = await hmacHex(secret, serial);
+    const sig = sigFull.slice(0, SIG_LEN).toUpperCase();
+    const code = `${serial}${sig}`; // 예: A1B2F9C3 (총 8자리, 구분자 없음)
 
     // 검증 URL이 설정돼 있으면 QR에 "URL?code=코드"를 담아서, 스캔하면 바로 verify.html이 열리고
     // 코드가 자동으로 입력창에 채워지게 함. 없으면 기존처럼 코드 텍스트만 담음.
@@ -242,6 +335,10 @@ async function issue() {
 
   lastRows = rows;
   renderResult(rows);
+
+  // 발급과 동시에 바로 GitHub에 기록 — "발급은 됐는데 저장을 깜빡해서 대장에 없는" 상황을 방지.
+  // 실패해도(네트워크 문제 등) [GitHub에 발급 기록 저장] 버튼으로 재시도할 수 있습니다.
+  await pushToGithub();
 }
 
 function renderResult(rows) {

@@ -31,7 +31,7 @@
 <input id="secret" type="password" placeholder="비밀키 입력">
 
 <label>상품권 코드 (QR 스캔 후 나온 텍스트를 붙여넣기)</label>
-<input id="code" type="text" placeholder="예: A1B2C9-10000-20261231-3F9A2C1B4E5D" autocomplete="off">
+<input id="code" type="text" placeholder="예: A1B2F9C3" autocomplete="off" maxlength="12">
 
 <button onclick="verify()">확인하기</button>
 
@@ -39,9 +39,8 @@
 <button id="useBtn" onclick="markUsed()">이 코드 사용 처리하기 (이 기기에만 기록)</button>
 
 <p class="note">
-  ℹ️ 서명(위조) 검증은 인터넷 없이도 동작합니다. "이미 사용됨" 여부는 GitHub에 설정해두면
-  여러 기기가 공유해서 확인합니다 — 단, 그 순간에는 인터넷 연결이 필요합니다.
-  네트워크가 안 되면 이 기기에만 기록되는 방식으로 자동 대체됩니다.
+  ℹ️ 코드가 진짜로 발급된 것인지(위조 여부)는 인터넷 없이도 확인됩니다. 다만 금액·유효기간·이미 사용됐는지는
+  코드 안에 들어있지 않고 GitHub의 발급대장(vouchers.json)에서만 알 수 있어서, 그 부분은 인터넷 연결이 필요합니다.
 </p>
 <button class="link-btn" onclick="resetUsed()">이 기기의 로컬 사용기록 초기화</button>
 <button class="link-btn" onclick="resetSecretCache()">이 기기에 저장된 비밀키 지우기</button>
@@ -54,6 +53,10 @@ let pendingEncryptedBlob = null;
 // GitHub 설정은 화면 입력칸이 없고, 이 변수 하나로만 관리됩니다.
 // make-config.html이 만든 암호화 파일에서만 채워집니다.
 let currentGhCfg = { owner: '', repo: '', branch: 'main', path: 'vouchers.json', token: '' };
+
+// issue.html과 반드시 같은 값이어야 합니다 (코드 = 일련번호 + 서명, 구분자 없이 총 8자리).
+const SERIAL_LEN = 4;
+const SIG_LEN = 4;
 
 function ghConfigReady(cfg) {
   return !!(cfg.owner && cfg.repo && cfg.token);
@@ -154,15 +157,16 @@ async function verify() {
 
   localStorage.setItem('voucherSecretCache', secret); // 이 기기에서 다음부터 자동으로 채워지도록 기억
 
-  const parts = rawCode.split('-');
-  if (parts.length !== 4) {
-    showResult('bad', '❌ 형식이 올바르지 않은 코드입니다.');
+  const cleanCode = rawCode.replace(/-/g, ''); // 혹시 사람이 구분자를 넣어 타이핑해도 허용
+  if (cleanCode.length !== SERIAL_LEN + SIG_LEN) {
+    showResult('bad', `❌ 형식이 올바르지 않은 코드입니다. (${SERIAL_LEN + SIG_LEN}자리여야 함)`);
     return;
   }
-  const [serial, amount, expiry, sig] = parts;
+  const serial = cleanCode.slice(0, SERIAL_LEN);
+  const sig = cleanCode.slice(SERIAL_LEN);
 
-  const payload = `${serial}|${amount}|${expiry}`;
-  const expectedFull = await hmacHex(secret, payload);
+  // 서명은 "일련번호"만으로 계산됩니다 — 금액/만료일은 코드 안에 없고 vouchers.json에서만 조회합니다.
+  const expectedFull = await hmacHex(secret, serial);
   const expected = expectedFull.slice(0, sig.length).toUpperCase();
 
   if (expected !== sig) {
@@ -170,55 +174,52 @@ async function verify() {
     return;
   }
 
-  // 서명은 정상 → 만료일 체크
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-
-  if (expiry < todayStr) {
-    showResult('expired', '⏰ 서명은 정상이지만, 유효기간이 만료되었습니다.<div class="detail">' +
-      `금액 ${Number(amount).toLocaleString()}원 · 만료 ${formatDate(expiry)}</div>`);
-    return;
-  }
-
-  const detail = `금액 ${Number(amount).toLocaleString()}원 · 만료 ${formatDate(expiry)}까지`;
+  // 서명은 정상 → 이제 금액/만료일/사용여부를 알기 위해 GitHub 조회가 반드시 필요합니다.
   let ghCfg = currentGhCfg;
   if (!ghConfigReady(ghCfg) && pendingEncryptedBlob) {
     ghCfg = (await tryAutoUnlockWithSecret(secret)) || ghCfg;
   }
 
   if (ghConfigReady(ghCfg)) {
-    // GitHub에서 공유 사용기록 확인 시도
     try {
       const { list } = await ghGetFile(ghCfg);
       const entry = list.find(v => v.serial === serial);
       if (!entry) {
-        showResult('bad', '❌ 발급 기록에 없는 코드입니다 (GitHub 등록 목록 기준).<div class="detail">서명은 맞지만 발급대장에 없습니다.</div>');
+        showResult('bad', '❌ 발급 기록에 없는 코드입니다 (GitHub 등록 목록 기준).<div class="detail">' +
+          '서명은 맞지만 발급대장에 없습니다. 위조된 코드이거나, ' +
+          '<b>사용완료된 지 1년이 넘게 지났거나 유효기간이 1년 넘게 지나 발급대장에서 정리(삭제)된 코드</b>일 수 있습니다.' +
+          '</div>');
+        return;
+      }
+
+      const detail = `금액 ${Number(entry.amount).toLocaleString()}원 · 만료 ${formatDate(entry.expiry)}까지`;
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+
+      if (entry.expiry < todayStr) {
+        showResult('expired', `⏰ 유효기간이 만료되었습니다.<div class="detail">${detail}</div>`);
         return;
       }
       if (entry.used) {
         showResult('used', `⚠️ 이미 사용 처리된 코드입니다.<div class="detail">${detail}<br>사용 시각: ${entry.usedAt || '-'}</div>`);
         return;
       }
-      showResult('ok', `✅ 정상 상품권입니다.<div class="detail">${detail}<br><span style="color:#2e7d32">(GitHub 공유 기록 기준 미사용)</span></div>`);
-      currentValidCode = rawCode;
+      showResult('ok', `✅ 정상 상품권입니다.<div class="detail">${detail}</div>`);
+      currentValidCode = cleanCode;
       currentSerial = serial;
       currentUseMode = 'github';
       document.getElementById('useBtn').style.display = 'block';
       return;
     } catch (e) {
-      // 네트워크/설정 문제 → 로컬 모드로 대체
-      console.warn('GitHub 조회 실패, 로컬 모드로 대체:', e.message);
+      console.warn('GitHub 조회 실패:', e.message);
+      showResult('expired', '⚠️ 서명은 정상이지만, 금액/유효기간/사용여부를 확인하지 못했습니다.<div class="detail">GitHub 조회 실패 — 인터넷 연결을 확인하세요.</div>');
+      return;
     }
   }
 
-  // 로컬(오프라인) 모드: 이 기기 안에서만 사용여부 확인
-  const usedSet = getUsedSet();
-  if (usedSet.has(rawCode)) {
-    showResult('used', `⚠️ 이미 이 기기에서 사용 처리된 코드입니다. (오프라인 모드)<div class="detail">${detail}</div>`);
-    return;
-  }
-  showResult('ok', `✅ 정상 상품권입니다. (오프라인 모드 — 이 기기 기록만 확인됨)<div class="detail">${detail}</div>`);
-  currentValidCode = rawCode;
+  // GitHub 설정 자체가 없는 경우: 서명만 확인 가능하고, 금액/만료일/사용여부는 알 수 없음
+  showResult('expired', '⚠️ 서명은 정상이지만, 금액/유효기간을 확인할 수 없습니다.<div class="detail">GitHub 설정이 없어 발급대장을 조회하지 못했습니다 — 인터넷 연결 또는 비밀키를 확인하세요.</div>');
+  currentValidCode = cleanCode;
   currentSerial = serial;
   currentUseMode = 'local';
   document.getElementById('useBtn').style.display = 'block';
