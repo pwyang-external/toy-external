@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>사내 상품권 발급 도구</title>
+<style>
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif; max-width: 720px; margin: 30px auto; padding: 0 16px; line-height: 1.5; color: #222; }
+  h1 { font-size: 20px; }
+  .box { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: bold; margin-top: 10px; font-size: 14px; }
+  input { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 4px; font-size: 15px; }
+  button { margin-top: 14px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  th { background: #f4f4f4; }
+  textarea { width: 100%; height: 140px; margin-top: 8px; font-family: monospace; font-size: 13px; }
+  .warn { background: #fff8e1; border: 1px solid #ffca28; padding: 10px; border-radius: 6px; font-size: 13px; }
+  .note { color: #666; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>🎫 사내 상품권 발급 도구 (오프라인)</h1>
+<p class="note">이 페이지는 인터넷 연결 없이 동작합니다. 발급한 코드는 서버에 저장되지 않으니, 아래 결과를 CSV로 반드시 내려받아 보관하세요.</p>
+
+<div class="box warn">
+  <b>비밀키(SECRET KEY)</b>는 발급자와 검증자만 알아야 하는 값입니다.<br>
+  이 값을 잊으면 검증 자체가 불가능하고, 유출되면 누구나 위조 가능합니다. 안전한 곳(예: 비밀번호 관리자)에 별도 기록해두세요.
+</div>
+
+<div class="box">
+  <label>비밀키 (예: 회사이름_2026_임의문자열)</label>
+  <input id="secret" type="text" placeholder="예: emcore-gift-9K2x!qP">
+
+  <label>금액 (원)</label>
+  <input id="amount" type="number" value="10000" min="1">
+
+  <label>유효기간 (만료일)</label>
+  <input id="expiry" type="date">
+
+  <label>발급 수량</label>
+  <input id="count" type="number" value="10" min="1" max="1000">
+
+  <button onclick="issue()">코드 발급하기</button>
+</div>
+
+<div class="box" id="resultBox" style="display:none">
+  <b>발급 결과 (<span id="resultCount"></span>건)</b>
+  <table id="resultTable">
+    <thead><tr><th>#</th><th>코드</th><th>금액</th><th>만료일</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <label>코드만 복사 (QR 생성 도구에 붙여넣기용, 한 줄에 하나씩)</label>
+  <textarea id="codeList" readonly></textarea>
+  <button onclick="copyCodes()">코드 목록 복사</button>
+  <button onclick="downloadCSV()">CSV로 다운로드</button>
+
+  <p class="note">
+    이제 이 코드들을 QR코드 이미지로 바꿔야 합니다. 인터넷이 되는 PC에서 무료 QR 일괄생성 도구
+    (예: 검색 "bulk qr code generator", 또는 오프라인 도구인
+    <a href="https://github.com/lovnishverma/free-qr-code-generator.io" target="_blank">free-qr-code-generator.io</a>)에
+    위 코드 목록을 붙여넣어 QR 이미지들을 만들면 됩니다. 코드 발급(이 단계)만 미리 준비해두면 되고,
+    실제 검증은 인터넷 없이 <b>verify.html</b>로 합니다.
+  </p>
+</div>
+
+<script>
+async function hmacHex(secret, message) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const SERIAL_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 혼동되는 0/O, 1/I/L 제외
+function randomSerial(len = 6) {
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map(b => SERIAL_CHARS[b % SERIAL_CHARS.length]).join('');
+}
+
+let lastRows = [];
+
+async function issue() {
+  const secret = document.getElementById('secret').value.trim();
+  const amount = document.getElementById('amount').value.trim();
+  const expiryRaw = document.getElementById('expiry').value; // yyyy-mm-dd
+  const count = parseInt(document.getElementById('count').value, 10);
+
+  if (!secret) { alert('비밀키를 입력하세요.'); return; }
+  if (!amount || !expiryRaw || !count) { alert('모든 값을 입력하세요.'); return; }
+
+  const expiry = expiryRaw.replace(/-/g, ''); // YYYYMMDD
+
+  const seen = new Set();
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    let serial;
+    do { serial = randomSerial(); } while (seen.has(serial));
+    seen.add(serial);
+
+    const payload = `${serial}|${amount}|${expiry}`;
+    const sigFull = await hmacHex(secret, payload);
+    const sig = sigFull.slice(0, 12).toUpperCase(); // 48비트, 내부용으로 충분
+    const code = `${serial}-${amount}-${expiry}-${sig}`;
+    rows.push({ code, amount, expiry });
+  }
+
+  lastRows = rows;
+  renderResult(rows);
+}
+
+function renderResult(rows) {
+  const tbody = document.querySelector('#resultTable tbody');
+  tbody.innerHTML = '';
+  rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i + 1}</td><td>${r.code}</td><td>${Number(r.amount).toLocaleString()}원</td><td>${r.expiry}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('resultCount').textContent = rows.length;
+  document.getElementById('codeList').value = rows.map(r => r.code).join('\n');
+  document.getElementById('resultBox').style.display = 'block';
+}
+
+function copyCodes() {
+  const ta = document.getElementById('codeList');
+  ta.select();
+  navigator.clipboard?.writeText(ta.value).catch(() => {
+    document.execCommand('copy');
+  });
+  alert('복사되었습니다.');
+}
+
+function downloadCSV() {
+  const header = '코드,금액,만료일\n';
+  const body = lastRows.map(r => `${r.code},${r.amount},${r.expiry}`).join('\n');
+  const blob = new Blob(['﻿' + header + body], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `voucher_codes_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>

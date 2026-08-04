@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>상품권 진위 확인</title>
+<style>
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif; max-width: 480px; margin: 20px auto; padding: 0 16px; line-height: 1.5; color: #222; }
+  h1 { font-size: 20px; text-align: center; }
+  label { display: block; font-weight: bold; margin-top: 14px; font-size: 14px; }
+  input { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px; font-size: 16px; }
+  button { width: 100%; margin-top: 16px; padding: 14px; font-size: 17px; cursor: pointer; }
+  #result { margin-top: 20px; padding: 18px; border-radius: 10px; font-size: 17px; text-align: center; display: none; }
+  .ok { background: #e6f7e9; border: 2px solid #2e7d32; color: #1b5e20; }
+  .bad { background: #fdecea; border: 2px solid #c62828; color: #b71c1c; }
+  .expired { background: #fff3e0; border: 2px solid #ef6c00; color: #e65100; }
+  .used { background: #eceff1; border: 2px solid #607d8b; color: #37474f; }
+  .detail { font-size: 13px; margin-top: 8px; font-weight: normal; }
+  .note { color: #666; font-size: 12px; margin-top: 20px; }
+  #useBtn { background: #607d8b; color: white; border: none; display: none; }
+  #resetBtn { background: none; border: none; color: #888; font-size: 12px; text-decoration: underline; margin-top: 6px; width: auto; padding: 4px; }
+</style>
+</head>
+<body>
+
+<h1>🔍 상품권 진위 확인</h1>
+
+<label>비밀키 (발급 시 사용한 것과 동일)</label>
+<input id="secret" type="password" placeholder="비밀키 입력">
+
+<label>상품권 코드 (QR 스캔 후 나온 텍스트를 붙여넣기)</label>
+<input id="code" type="text" placeholder="예: A1B2C9-10000-20261231-3F9A2C1B4E5D" autocomplete="off">
+
+<button onclick="verify()">확인하기</button>
+
+<div id="result"></div>
+<button id="useBtn" onclick="markUsed()">이 코드 사용 처리하기 (이 기기에만 기록)</button>
+
+<p class="note">
+  ⚠️ 이 검증은 "발급자가 만든 진짜 코드인지"만 확인합니다. 여러 검증 기기가 있는 경우
+  "이미 사용됨" 여부는 이 기기 안에서만 기억되며 다른 기기와 공유되지 않습니다.
+  여러 명이 검증한다면 사용 처리된 코드를 한곳에 모으는 규칙(예: 회수 대장)을 별도로 운영하세요.
+</p>
+<button id="resetBtn" onclick="resetUsed()">이 기기의 사용기록 초기화</button>
+
+<script>
+async function hmacHex(secret, message) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function getUsedSet() {
+  return new Set(JSON.parse(localStorage.getItem('usedVoucherCodes') || '[]'));
+}
+function saveUsedSet(set) {
+  localStorage.setItem('usedVoucherCodes', JSON.stringify([...set]));
+}
+
+let currentValidCode = null;
+
+function showResult(cls, html) {
+  const el = document.getElementById('result');
+  el.className = cls;
+  el.innerHTML = html;
+  el.style.display = 'block';
+}
+
+async function verify() {
+  const secret = document.getElementById('secret').value.trim();
+  const rawCode = document.getElementById('code').value.trim().toUpperCase();
+  document.getElementById('useBtn').style.display = 'none';
+  currentValidCode = null;
+
+  if (!secret) { alert('비밀키를 입력하세요.'); return; }
+  if (!rawCode) { alert('코드를 입력하세요.'); return; }
+
+  const parts = rawCode.split('-');
+  if (parts.length !== 4) {
+    showResult('bad', '❌ 형식이 올바르지 않은 코드입니다.');
+    return;
+  }
+  const [serial, amount, expiry, sig] = parts;
+
+  const payload = `${serial}|${amount}|${expiry}`;
+  const expectedFull = await hmacHex(secret, payload);
+  const expected = expectedFull.slice(0, sig.length).toUpperCase();
+
+  if (expected !== sig) {
+    showResult('bad', '❌ 위조되었거나 잘못된 코드입니다.<div class="detail">서명이 일치하지 않습니다.</div>');
+    return;
+  }
+
+  // 서명은 정상 → 만료일 체크
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+  const usedSet = getUsedSet();
+
+  if (usedSet.has(rawCode)) {
+    showResult('used', '⚠️ 이미 이 기기에서 사용 처리된 코드입니다.<div class="detail">' +
+      `금액 ${Number(amount).toLocaleString()}원 · 만료 ${formatDate(expiry)}</div>`);
+    return;
+  }
+
+  if (expiry < todayStr) {
+    showResult('expired', '⏰ 서명은 정상이지만, 유효기간이 만료되었습니다.<div class="detail">' +
+      `금액 ${Number(amount).toLocaleString()}원 · 만료 ${formatDate(expiry)}</div>`);
+    return;
+  }
+
+  showResult('ok', '✅ 정상 상품권입니다.<div class="detail">' +
+    `금액 ${Number(amount).toLocaleString()}원 · 만료 ${formatDate(expiry)}까지</div>`);
+  currentValidCode = rawCode;
+  document.getElementById('useBtn').style.display = 'block';
+}
+
+function markUsed() {
+  const set = getUsedSet();
+  set.add(currentValidCode);
+  saveUsedSet(set);
+  document.getElementById('useBtn').style.display = 'none';
+  showResult('used', '✔️ 사용 처리 완료 (이 기기에 기록됨)');
+}
+
+function resetUsed() {
+  if (confirm('이 기기에 기록된 사용 목록을 모두 초기화할까요?')) {
+    localStorage.removeItem('usedVoucherCodes');
+    alert('초기화되었습니다.');
+  }
+}
+
+function formatDate(yyyymmdd) {
+  return `${yyyymmdd.slice(0,4)}-${yyyymmdd.slice(4,6)}-${yyyymmdd.slice(6,8)}`;
+}
+</script>
+</body>
+</html>
