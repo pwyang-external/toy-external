@@ -28,8 +28,9 @@
   이 값을 잊으면 검증 자체가 불가능하고, 유출되면 누구나 위조 가능합니다. 안전한 곳(예: 비밀번호 관리자)에 별도 기록해두세요.
 </div>
 
-<div class="box">
-  <b>GitHub 연동 설정 (사용 여부 공유 기록용, 선택사항)</b>
+<details class="box">
+  <summary>⚙️ GitHub 연동 수동 설정 (보통은 안 열어도 됨)</summary>
+  <p class="note">아래 [비밀키]와 암호화 설정 시 사용한 암호가 같다면, 이 화면을 열 필요 없이 자동으로 채워집니다. 다르게 하고 싶을 때만 여기서 직접 입력하세요.</p>
   <label>GitHub 계정/조직 (owner)</label>
   <input id="gh_owner" type="text" placeholder="예: junyoungkim">
   <label>저장소 이름 (repo)</label>
@@ -42,11 +43,12 @@
   <input id="gh_token" type="password" placeholder="github_pat_...">
   <button onclick="saveGhConfig()">설정 저장 (이 브라우저에만 저장됨)</button>
   <p class="note" id="ghStatus"></p>
-</div>
+</details>
 
 <div class="box">
   <label>비밀키 (예: 회사이름_2026_임의문자열)</label>
   <input id="secret" type="text" placeholder="예: emcore-gift-9K2x!qP">
+  <p class="note">💡 이 비밀키를 <code>make-config.html</code>에서 쓴 암호와 같게 하면, GitHub 설정이 자동으로 풀립니다.</p>
 
   <label>금액 (원)</label>
   <input id="amount" type="number" value="10000" min="1">
@@ -57,43 +59,81 @@
   <label>발급 수량</label>
   <input id="count" type="number" value="10" min="1" max="1000">
 
+  <label>검증 페이지 URL (QR을 스캔하면 바로 여기로 연결됩니다, 선택사항)</label>
+  <input id="verifyUrl" type="text" placeholder="예: https://junyoungkim.github.io/voucher-qr/verify.html">
+  <p class="note">비워두면 QR에 코드 텍스트만 담깁니다 (기존 방식 — 카메라로 찍은 텍스트를 직접 붙여넣어야 함).</p>
+
   <button onclick="issue()">코드 발급하기</button>
 </div>
 
 <div class="box" id="resultBox" style="display:none">
   <b>발급 결과 (<span id="resultCount"></span>건)</b>
   <table id="resultTable">
-    <thead><tr><th>#</th><th>코드</th><th>금액</th><th>만료일</th></tr></thead>
+    <thead><tr><th>#</th><th>QR</th><th>코드</th><th>금액</th><th>만료일</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 
-  <label>코드만 복사 (QR 생성 도구에 붙여넣기용, 한 줄에 하나씩)</label>
-  <textarea id="codeList" readonly></textarea>
-  <button onclick="copyCodes()">코드 목록 복사</button>
-  <button onclick="downloadCSV()">CSV로 다운로드</button>
+  <button onclick="openPrintSheet()">🖨️ 전체 QR 인쇄용 시트 열기</button>
+  <button onclick="downloadCSV()">CSV로 다운로드 (코드 텍스트)</button>
   <button onclick="pushToGithub()">GitHub에 발급 기록 저장</button>
   <p class="note" id="pushStatus"></p>
 
-  <p class="note">
-    이제 이 코드들을 QR코드 이미지로 바꿔야 합니다. 인터넷이 되는 PC에서 무료 QR 일괄생성 도구
-    (예: 검색 "bulk qr code generator", 또는 오프라인 도구인
-    <a href="https://github.com/lovnishverma/free-qr-code-generator.io" target="_blank">free-qr-code-generator.io</a>)에
-    위 코드 목록을 붙여넣어 QR 이미지들을 만들면 됩니다. 코드 발급(이 단계)만 미리 준비해두면 되고,
-    실제 검증은 인터넷 없이 <b>verify.html</b>로 합니다.
-  </p>
+  <label>코드만 복사 (필요시 다른 도구에 붙여넣기용)</label>
+  <textarea id="codeList" readonly></textarea>
+  <button onclick="copyCodes()">코드 목록 복사</button>
 </div>
 
+<script src="qrcode-lib.js"></script>
 <script src="github-sync.js"></script>
+<script src="crypto-config.js"></script>
+<script src="github-config.local.js" onerror="console.warn('github-config.local.js 없음 — 수동 입력 필요')"></script>
 <script>
-window.addEventListener('DOMContentLoaded', () => {
-  const cfg = ghLoadConfig();
+let pendingEncryptedBlob = null;
+
+function fillGhFields(cfg) {
   document.getElementById('gh_owner').value = cfg.owner || '';
   document.getElementById('gh_repo').value = cfg.repo || '';
   document.getElementById('gh_branch').value = cfg.branch || 'main';
   document.getElementById('gh_path').value = cfg.path || 'vouchers.json';
   document.getElementById('gh_token').value = cfg.token || '';
-  if (cfg.owner) document.getElementById('ghStatus').textContent = '저장된 설정을 불러왔습니다.';
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  // 우선순위: localStorage에 저장된 값 > github-config.local.js 기본값 > 암호화된 파일(비밀키 입력 시 자동 시도)
+  let cfg = ghLoadConfig();
+  if (!cfg.owner && typeof window.GH_CONFIG_DEFAULT !== 'undefined' && window.GH_CONFIG_DEFAULT.owner) {
+    cfg = window.GH_CONFIG_DEFAULT;
+    document.getElementById('ghStatus').textContent = 'github-config.local.js에서 기본값을 불러왔습니다.';
+  } else if (cfg.owner) {
+    document.getElementById('ghStatus').textContent = '저장된 설정을 불러왔습니다.';
+  } else {
+    try {
+      const res = await fetch('./github-config.encrypted.json');
+      if (res.ok) pendingEncryptedBlob = await res.json();
+    } catch (e) { /* 파일이 없으면 그냥 수동 입력 모드 */ }
+  }
+  fillGhFields(cfg);
+
+  const savedUrl = localStorage.getItem('voucherVerifyUrl');
+  if (savedUrl) document.getElementById('verifyUrl').value = savedUrl;
 });
+
+// "비밀키" 입력값으로 암호화된 GitHub 설정 복호화를 시도.
+// make-config.html에서 이 비밀키와 같은 값으로 암호화해뒀다면 성공해서 자동 채워지고,
+// 다르면 조용히 실패 (에러를 띄우지 않고 수동 입력 모드로 남음).
+async function tryAutoUnlockWithSecret(secret) {
+  if (!pendingEncryptedBlob) return null;
+  try {
+    const cfg = await decryptConfig(pendingEncryptedBlob, secret);
+    fillGhFields(cfg);
+    ghSaveConfig(cfg); // 성공하면 캐시 → 다음부터는 이 기기에서 다시 시도 안 함
+    pendingEncryptedBlob = null;
+    document.getElementById('ghStatus').textContent = '✅ 비밀키로 GitHub 설정 자동 해제됨.';
+    return cfg;
+  } catch (e) {
+    return null;
+  }
+}
 
 function readGhConfigFromForm() {
   return {
@@ -111,9 +151,17 @@ function saveGhConfig() {
   document.getElementById('ghStatus').textContent = '저장되었습니다. (이 브라우저의 localStorage에만 저장됨)';
 }
 
+function ghConfigReady(cfg) {
+  return !!(cfg.owner && cfg.repo && cfg.token);
+}
+
 async function pushToGithub() {
   if (!lastRows.length) { alert('먼저 코드를 발급하세요.'); return; }
-  const cfg = readGhConfigFromForm();
+  let cfg = readGhConfigFromForm();
+  if (!ghConfigReady(cfg)) {
+    const secret = document.getElementById('secret').value.trim();
+    cfg = (await tryAutoUnlockWithSecret(secret)) || cfg;
+  }
   if (!cfg.owner || !cfg.repo || !cfg.token) {
     alert('GitHub 설정(owner/repo/token)을 먼저 입력하세요.');
     return;
@@ -164,9 +212,17 @@ async function issue() {
   const amount = document.getElementById('amount').value.trim();
   const expiryRaw = document.getElementById('expiry').value; // yyyy-mm-dd
   const count = parseInt(document.getElementById('count').value, 10);
+  const verifyUrl = document.getElementById('verifyUrl').value.trim();
 
   if (!secret) { alert('비밀키를 입력하세요.'); return; }
   if (!amount || !expiryRaw || !count) { alert('모든 값을 입력하세요.'); return; }
+
+  // GitHub 설정이 아직 안 채워져 있으면, 방금 입력한 비밀키로 자동 해제를 시도
+  if (!ghConfigReady(readGhConfigFromForm())) {
+    await tryAutoUnlockWithSecret(secret);
+  }
+
+  if (verifyUrl) localStorage.setItem('voucherVerifyUrl', verifyUrl);
 
   const expiry = expiryRaw.replace(/-/g, ''); // YYYYMMDD
 
@@ -181,7 +237,19 @@ async function issue() {
     const sigFull = await hmacHex(secret, payload);
     const sig = sigFull.slice(0, 12).toUpperCase(); // 48비트, 내부용으로 충분
     const code = `${serial}-${amount}-${expiry}-${sig}`;
-    rows.push({ code, amount, expiry });
+
+    // 검증 URL이 설정돼 있으면 QR에 "URL?code=코드"를 담아서, 스캔하면 바로 verify.html이 열리고
+    // 코드가 자동으로 입력창에 채워지게 함. 없으면 기존처럼 코드 텍스트만 담음.
+    const qrContent = verifyUrl
+      ? `${verifyUrl}${verifyUrl.includes('?') ? '&' : '?'}code=${encodeURIComponent(code)}`
+      : code;
+
+    const qr = qrcode(0, 'M'); // typeNumber 0 = 자동, errorCorrectionLevel M
+    qr.addData(qrContent);
+    qr.make();
+    const qrDataUrl = qr.createDataURL(6, 4); // 모듈당 6px, 여백 4모듈
+
+    rows.push({ code, amount, expiry, qrDataUrl });
   }
 
   lastRows = rows;
@@ -193,12 +261,47 @@ function renderResult(rows) {
   tbody.innerHTML = '';
   rows.forEach((r, i) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${i + 1}</td><td>${r.code}</td><td>${Number(r.amount).toLocaleString()}원</td><td>${r.expiry}</td>`;
+    const fileName = `voucher_${r.code}.png`;
+    tr.innerHTML =
+      `<td>${i + 1}</td>` +
+      `<td><img src="${r.qrDataUrl}" width="70" height="70" alt="QR"></td>` +
+      `<td>${r.code}</td>` +
+      `<td>${Number(r.amount).toLocaleString()}원</td>` +
+      `<td>${r.expiry}</td>` +
+      `<td><a href="${r.qrDataUrl}" download="${fileName}">PNG 저장</a></td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('resultCount').textContent = rows.length;
   document.getElementById('codeList').value = rows.map(r => r.code).join('\n');
   document.getElementById('resultBox').style.display = 'block';
+}
+
+function openPrintSheet() {
+  if (!lastRows.length) { alert('먼저 코드를 발급하세요.'); return; }
+  const win = window.open('', '_blank');
+  const cards = lastRows.map(r => `
+    <div class="card">
+      <img src="${r.qrDataUrl}" width="160" height="160">
+      <div class="amount">${Number(r.amount).toLocaleString()}원</div>
+      <div class="expiry">~${r.expiry.slice(0,4)}-${r.expiry.slice(4,6)}-${r.expiry.slice(6,8)}</div>
+      <div class="code">${r.code}</div>
+    </div>`).join('');
+  win.document.write(`
+    <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>상품권 QR 인쇄 시트</title>
+    <style>
+      body { font-family: -apple-system, "Malgun Gothic", sans-serif; }
+      .grid { display: flex; flex-wrap: wrap; gap: 12px; }
+      .card { width: 190px; border: 1px dashed #999; border-radius: 8px; padding: 12px; text-align: center; page-break-inside: avoid; }
+      .amount { font-weight: bold; font-size: 16px; margin-top: 6px; }
+      .expiry { font-size: 12px; color: #666; }
+      .code { font-family: monospace; font-size: 10px; margin-top: 4px; word-break: break-all; }
+    </style></head>
+    <body>
+      <div class="grid">${cards}</div>
+      <script>window.onload = () => window.print();<\/script>
+    </body></html>
+  `);
+  win.document.close();
 }
 
 function copyCodes() {
