@@ -20,12 +20,28 @@
 </head>
 <body>
 
-<h1>🎫 사내 상품권 발급 도구 (오프라인)</h1>
-<p class="note">이 페이지는 인터넷 연결 없이 동작합니다. 발급한 코드는 서버에 저장되지 않으니, 아래 결과를 CSV로 반드시 내려받아 보관하세요.</p>
+<h1>🎫 사내 상품권 발급 도구</h1>
+<p class="note">코드 생성 자체는 인터넷 없이 동작합니다. GitHub에 발급 기록을 남기려면 아래 GitHub 설정을 입력하세요 (그 경우만 인터넷 필요).</p>
 
 <div class="box warn">
   <b>비밀키(SECRET KEY)</b>는 발급자와 검증자만 알아야 하는 값입니다.<br>
   이 값을 잊으면 검증 자체가 불가능하고, 유출되면 누구나 위조 가능합니다. 안전한 곳(예: 비밀번호 관리자)에 별도 기록해두세요.
+</div>
+
+<div class="box">
+  <b>GitHub 연동 설정 (사용 여부 공유 기록용, 선택사항)</b>
+  <label>GitHub 계정/조직 (owner)</label>
+  <input id="gh_owner" type="text" placeholder="예: junyoungkim">
+  <label>저장소 이름 (repo)</label>
+  <input id="gh_repo" type="text" placeholder="예: voucher-qr">
+  <label>브랜치</label>
+  <input id="gh_branch" type="text" value="main">
+  <label>JSON 파일 경로</label>
+  <input id="gh_path" type="text" value="vouchers.json">
+  <label>Fine-grained PAT (이 저장소 전용, Contents 권한만)</label>
+  <input id="gh_token" type="password" placeholder="github_pat_...">
+  <button onclick="saveGhConfig()">설정 저장 (이 브라우저에만 저장됨)</button>
+  <p class="note" id="ghStatus"></p>
 </div>
 
 <div class="box">
@@ -55,6 +71,8 @@
   <textarea id="codeList" readonly></textarea>
   <button onclick="copyCodes()">코드 목록 복사</button>
   <button onclick="downloadCSV()">CSV로 다운로드</button>
+  <button onclick="pushToGithub()">GitHub에 발급 기록 저장</button>
+  <p class="note" id="pushStatus"></p>
 
   <p class="note">
     이제 이 코드들을 QR코드 이미지로 바꿔야 합니다. 인터넷이 되는 PC에서 무료 QR 일괄생성 도구
@@ -65,7 +83,64 @@
   </p>
 </div>
 
+<script src="github-sync.js"></script>
 <script>
+window.addEventListener('DOMContentLoaded', () => {
+  const cfg = ghLoadConfig();
+  document.getElementById('gh_owner').value = cfg.owner || '';
+  document.getElementById('gh_repo').value = cfg.repo || '';
+  document.getElementById('gh_branch').value = cfg.branch || 'main';
+  document.getElementById('gh_path').value = cfg.path || 'vouchers.json';
+  document.getElementById('gh_token').value = cfg.token || '';
+  if (cfg.owner) document.getElementById('ghStatus').textContent = '저장된 설정을 불러왔습니다.';
+});
+
+function readGhConfigFromForm() {
+  return {
+    owner: document.getElementById('gh_owner').value.trim(),
+    repo: document.getElementById('gh_repo').value.trim(),
+    branch: document.getElementById('gh_branch').value.trim() || 'main',
+    path: document.getElementById('gh_path').value.trim() || 'vouchers.json',
+    token: document.getElementById('gh_token').value.trim()
+  };
+}
+
+function saveGhConfig() {
+  const cfg = readGhConfigFromForm();
+  ghSaveConfig(cfg);
+  document.getElementById('ghStatus').textContent = '저장되었습니다. (이 브라우저의 localStorage에만 저장됨)';
+}
+
+async function pushToGithub() {
+  if (!lastRows.length) { alert('먼저 코드를 발급하세요.'); return; }
+  const cfg = readGhConfigFromForm();
+  if (!cfg.owner || !cfg.repo || !cfg.token) {
+    alert('GitHub 설정(owner/repo/token)을 먼저 입력하세요.');
+    return;
+  }
+  const statusEl = document.getElementById('pushStatus');
+  statusEl.textContent = '저장 중...';
+  try {
+    const newEntries = lastRows.map(r => ({
+      serial: r.code.split('-')[0],
+      code: r.code,
+      amount: Number(r.amount),
+      expiry: r.expiry,
+      used: false,
+      usedAt: null,
+      issuedAt: new Date().toISOString()
+    }));
+    await ghPutFile(
+      cfg,
+      (list) => list.concat(newEntries),
+      `발급: ${newEntries.length}건 추가`
+    );
+    statusEl.textContent = `✅ GitHub에 ${newEntries.length}건 저장 완료`;
+  } catch (e) {
+    statusEl.textContent = `❌ 저장 실패: ${e.message}`;
+  }
+}
+
 async function hmacHex(secret, message) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
