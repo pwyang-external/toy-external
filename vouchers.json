@@ -1,1 +1,92 @@
-[]
+[
+  {
+    "serial": "ACGK",
+    "code": "ACGKF524",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "DD23",
+    "code": "DD23707B",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "4V38",
+    "code": "4V389086",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "RDQB",
+    "code": "RDQB22A0",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "HJFX",
+    "code": "HJFX8B1F",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "TNWA",
+    "code": "TNWAE946",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "2T5R",
+    "code": "2T5RFB8B",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "BWZ8",
+    "code": "BWZ8E13B",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "6WRK",
+    "code": "6WRKBE69",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  },
+  {
+    "serial": "JUVY",
+    "code": "JUVY1961",
+    "amount": 10000,
+    "expiry": "20260831",
+    "used": false,
+    "usedAt": null,
+    "issuedAt": "2026-08-05T03:28:40.472Z"
+  }
+]
