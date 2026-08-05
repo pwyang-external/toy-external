@@ -4,8 +4,8 @@
     "code": "ACGKF524",
     "amount": 10000,
     "expiry": "20260831",
-    "used": false,
-    "usedAt": null,
+    "used": true,
+    "usedAt": "2026-08-05T03:29:51.068Z",
     "issuedAt": "2026-08-05T03:28:40.472Z"
   },
   {
